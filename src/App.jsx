@@ -8,6 +8,19 @@ const store = {
 };
 const KEY = "cz-suivi-v1";
 
+// ── SYNC SUPABASE ────────────────────────────────────────────────
+const syncToSupabase = async (table, data, agent) => {
+  try {
+    await fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ table, action: 'insert', data, agent }),
+    });
+  } catch (e) {
+    console.warn('Sync Supabase échouée:', e.message);
+  }
+};
+
 // ── STYLES ──────────────────────────────────────────────────────
 const injectStyles = () => {
   if (document.getElementById("czs-s")) return;
@@ -162,6 +175,28 @@ function NewSessionForm({client,onSave,onCancel}) {
     } catch(e){setErr("Erreur. Réessaie.");}
     finally{setLoading(false);}
   };
+
+  const saveWithSync = async (sessionData) => {
+    // Sync vers Supabase
+    await syncToSupabase('seances', {
+      client_nom: `${client.nom}${client.entreprise ? ` — ${client.entreprise}` : ''}`,
+      numero_seance: client.sessions.length + 1,
+      date_seance: new Date().toISOString().slice(0, 10),
+      score_cash:        scores.cash        || 0,
+      score_strategie:   scores.strategie   || 0,
+      score_clients:     scores.clients     || 0,
+      score_equipe:      scores.equipe      || 0,
+      score_risques:     scores.risques     || 0,
+      score_croissance:  scores.croissance  || 0,
+      score_resilience:  scores.resilience  || 0,
+      points_forts:      sessionData.analysis?.motEncouragement || '',
+      points_vigilance:  (sessionData.analysis?.alertes || []).join(', '),
+      actions_prioritaires: (sessionData.analysis?.actions || []).join(' | '),
+      notes: notes || '',
+    }, 'suivi');
+    onSave(sessionData);
+  };
+
   return (
     <div>
       <div className="czs-serif" style={{fontSize:24,color:"#2D0A3E",marginBottom:4,fontStyle:"italic"}}>Nouvelle séance</div>
@@ -191,7 +226,7 @@ function NewSessionForm({client,onSave,onCancel}) {
         loading?<div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 0"}}><div style={{width:14,height:14,border:"2px solid #F5A623",borderTopColor:"transparent",borderRadius:"50%",animation:"czsSpin .8s linear infinite"}}/><span style={{fontSize:13,color:"#7C6A8E"}}>Analyse IA en cours…</span></div>:
         <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
           <button className="czs-btn" onClick={analyze}>✦ Analyser avec l'IA</button>
-          <button className="czs-btn-sm" onClick={()=>onSave({id:Date.now().toString(),date,notes,scores,analysis:null})}>Enregistrer sans analyse</button>
+          <button className="czs-btn-sm" onClick={()=>saveWithSync({id:Date.now().toString(),date,notes,scores,analysis:null})}>Enregistrer sans analyse</button>
           <button className="czs-btn-sm" onClick={onCancel}>Annuler</button>
         </div>
       ):(
@@ -205,7 +240,7 @@ function NewSessionForm({client,onSave,onCancel}) {
           {(analysis.actions||[]).length>0&&<div style={{padding:"12px 14px",borderRadius:12,border:"1px solid rgba(45,10,62,.08)",background:"#FAFAF8",marginBottom:10}}>{analysis.actions.map((a,i)=><div key={i} style={{fontSize:13,marginBottom:5,display:"flex",gap:8}}><span style={{color:"#F5A623",fontWeight:700}}>→</span><span>{a}</span></div>)}</div>}
           {analysis.motEncouragement&&<div style={{fontSize:13,color:"#065F46",padding:"8px 12px",borderRadius:10,border:"1px solid #6EE7B7",background:"#ECFDF5",marginBottom:14}}>💬 {analysis.motEncouragement}</div>}
           <div style={{display:"flex",gap:10}}>
-            <button className="czs-btn" onClick={()=>onSave({id:Date.now().toString(),date,notes,scores,analysis})}>✓ Enregistrer la séance</button>
+            <button className="czs-btn" onClick={()=>saveWithSync({id:Date.now().toString(),date,notes,scores,analysis})}>✓ Enregistrer la séance</button>
             <button className="czs-btn-sm" onClick={onCancel}>Annuler</button>
           </div>
         </div>
@@ -224,6 +259,14 @@ function CheckIn({client}) {
       const history=client.sessions.slice(-3).map((s,i)=>`Séance ${i+1} (${s.date}) : ${PILLIERS.map(p=>`${p.label}=${s.scores[p.id]}`).join(", ")}. Notes: ${s.notes||"aucune"}.`).join("\n");
       const r=await callAPI(CHECKIN_SYS,`Client : ${client.nom} — ${client.entreprise}\nType : ${client.typeAccompagnement}\nSéances : ${client.sessions.length}\nHistorique :\n${history||"Pas encore de séance"}`);
       setResult(r);
+      // SYNC SUPABASE — log événement check-in
+      await syncToSupabase('evenements', {
+        agent: 'suivi',
+        type_event: 'generation',
+        description: `Check-in préparé pour ${client.nom}`,
+        reference_type: 'clients',
+        metadata: { client: client.nom, secteur: client.secteur, nb_seances: client.sessions.length },
+      }, 'suivi');
     } catch(e){setErr("Erreur. Réessaie.");}
     finally{setLoading(false);}
   };
@@ -350,7 +393,6 @@ export default function AgentSuivi() {
   return (
     <div className="czs">
       <Nav/>
-      {/* Hero — affiché uniquement sur la liste */}
       {view==="list"&&clients.length===0&&(
         <div style={{background:"linear-gradient(135deg,#2D0A3E 0%,#1A0652 100%)",padding:"52px 24px 60px"}}>
           <div style={{maxWidth:720,margin:"0 auto"}}>
