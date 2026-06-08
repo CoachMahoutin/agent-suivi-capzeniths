@@ -91,10 +91,25 @@ const SEANCE_SYS = `Tu es l'Agent Suivi de CapZeniths. Analyse la séance d'acco
 const CHECKIN_SYS = `Tu es l'Agent Suivi de CapZeniths. Prépare l'ordre du jour de la prochaine séance. RÉPONDS EN JSON VALIDE sans backticks.
 {"agenda":["<point 1>","<point 2>","<point 3>"],"pointsCritiques":["<urgent>"],"questions":["<question 1>","<question 2>","<question 3>"],"exercicePrep":"<exercice préparatoire>","dureeEstimee":"60 min"}`;
 
-const callAPI = async (system,content) => {
-  const res=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system,messages:[{role:"user",content}]})});
-  const data=await res.json();
-  return JSON.parse((data.content?.[0]?.text||"").replace(/```json|```/g,"").trim());
+const callAPI = async (system, content) => {
+  const res = await fetch("/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 4000,
+      system,
+      messages: [{ role: "user", content }],
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`API ${res.status}: ${errText}`);
+  }
+  const data = await res.json();
+  const raw = (data.content?.[0]?.text || "").replace(/```json|```/g, "").trim();
+  const jsonMatch = raw.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+  return JSON.parse(jsonMatch ? jsonMatch[0] : raw);
 };
 
 const ScoreBar = ({score,prev}) => (
